@@ -21,6 +21,13 @@ import torch.nn.functional as F
 
 import dnnlib
 import legacy
+import lpips
+
+from mdf.mdfloss import MDFLoss
+
+loss_fn_alex = lpips.LPIPS(net='alex').cuda()
+loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
+loss_fn_mdf = MDFLoss("./mdf/weights/Ds_SISR.pth", cuda_available=True)
 
 def project(
     G,
@@ -35,6 +42,8 @@ def project(
     noise_ramp_length          = 0.75,
     regularize_noise_weight    = 1e5,
     verbose                    = False,
+    train_noise                = False,
+    loss_fn                    = "vgg",
     device: torch.device
 ):
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -54,7 +63,8 @@ def project(
     w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
 
     # Setup noise inputs.
-    noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
+    if train_noise:
+        noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
 
     # Load VGG16 feature detector.
     url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
@@ -69,12 +79,15 @@ def project(
 
     w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True) # pylint: disable=not-callable
     w_out = torch.zeros([num_steps] + list(w_opt.shape[1:]), dtype=torch.float32, device=device)
-    optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
+    if train_noise:
+        optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
 
-    # Init noise.
-    for buf in noise_bufs.values():
-        buf[:] = torch.randn_like(buf)
-        buf.requires_grad = True
+        # Init noise.
+        for buf in noise_bufs.values():
+            buf[:] = torch.randn_like(buf)
+            buf.requires_grad = True
+    else:
+        optimizer = torch.optim.Adam([w_opt], betas=(0.9, 0.999), lr=initial_learning_rate)
 
     for step in range(num_steps):
         # Learning rate schedule.
@@ -99,19 +112,29 @@ def project(
 
         # Features for synth images.
         synth_features = vgg16(synth_images, resize_images=False, return_lpips=True)
-        dist = (target_features - synth_features).square().sum()
+        if loss_fn == "lpips_vgg":
+            dist = loss_fn_vgg(target_images, synth_images).sum()
+        elif loss_fn == "lpips_alex":
+            dist = loss_fn_alex(target_images, synth_images).sum()
+        elif loss_fn == "mdf":
+            dist = loss_fn_mdf(synth_images, target_images).sum()
+        else:
+            dist = (target_features - synth_features).square().sum()
 
         # Noise regularization.
-        reg_loss = 0.0
-        for v in noise_bufs.values():
-            noise = v[None,None,:,:] # must be [1,1,H,W] for F.avg_pool2d()
-            while True:
-                reg_loss += (noise*torch.roll(noise, shifts=1, dims=3)).mean()**2
-                reg_loss += (noise*torch.roll(noise, shifts=1, dims=2)).mean()**2
-                if noise.shape[2] <= 8:
-                    break
-                noise = F.avg_pool2d(noise, kernel_size=2)
-        loss = dist + reg_loss * regularize_noise_weight
+        if train_noise:
+            reg_loss = 0.0
+            for v in noise_bufs.values():
+                noise = v[None,None,:,:] # must be [1,1,H,W] for F.avg_pool2d()
+                while True:
+                    reg_loss += (noise*torch.roll(noise, shifts=1, dims=3)).mean()**2
+                    reg_loss += (noise*torch.roll(noise, shifts=1, dims=2)).mean()**2
+                    if noise.shape[2] <= 8:
+                        break
+                    noise = F.avg_pool2d(noise, kernel_size=2)
+            loss = dist + reg_loss * regularize_noise_weight
+        else:
+            loss = dist
 
         # Step
         optimizer.zero_grad(set_to_none=True)
@@ -123,10 +146,11 @@ def project(
         w_out[step] = w_opt.detach()[0]
 
         # Normalize noise.
-        with torch.no_grad():
-            for buf in noise_bufs.values():
-                buf -= buf.mean()
-                buf *= buf.square().mean().rsqrt()
+        if train_noise:
+            with torch.no_grad():
+                for buf in noise_bufs.values():
+                    buf -= buf.mean()
+                    buf *= buf.square().mean().rsqrt()
 
     return w_out.repeat([1, G.mapping.num_ws, 1])
 
