@@ -44,6 +44,7 @@ def project(
     verbose                    = False,
     train_noise                = False,
     loss_fn                    = "vgg",
+    return_losses              = False,
     device: torch.device
 ):
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -89,6 +90,7 @@ def project(
     else:
         optimizer = torch.optim.Adam([w_opt], betas=(0.9, 0.999), lr=initial_learning_rate)
 
+    losses = []
     for step in range(num_steps):
         # Learning rate schedule.
         t = step / num_steps
@@ -117,7 +119,7 @@ def project(
         elif loss_fn == "lpips_alex":
             dist = loss_fn_alex(target_images, synth_images).sum()
         elif loss_fn == "mdf":
-            dist = loss_fn_mdf(synth_images, target_images).sum()
+            dist = loss_fn_mdf(target_images, synth_images).sum()
         else:
             dist = (target_features - synth_features).square().sum()
 
@@ -140,7 +142,8 @@ def project(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
-        logprint(f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}')
+        logprint(f'step {step+1:>4d}/{num_steps}: loss {float(loss):<5.2f}')
+        losses.append(float(loss))
 
         # Save projected W for each optimization step.
         w_out[step] = w_opt.detach()[0]
@@ -151,6 +154,9 @@ def project(
                 for buf in noise_bufs.values():
                     buf -= buf.mean()
                     buf *= buf.square().mean().rsqrt()
+    
+    if return_losses:
+        return w_out.repeat([1, G.mapping.num_ws, 1]), losses
 
     return w_out.repeat([1, G.mapping.num_ws, 1])
 
