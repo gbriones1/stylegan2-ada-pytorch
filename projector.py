@@ -24,12 +24,13 @@ import legacy
 import lpips
 
 from mdf.mdfloss import MDFLoss
-from pytorch_msssim.pytorch_msssim import MSSSIM
+import importlib
+pytorch_msssim = importlib.import_module("pytorch-msssim.pytorch_msssim")
 
 loss_fn_alex = lpips.LPIPS(net='alex').cuda()
 loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
 loss_fn_mdf = MDFLoss("./mdf/weights/Ds_SISR.pth", cuda_available=True)
-loss_fn_msssim = MSSSIM()
+loss_fn_msssim = pytorch_msssim.MSSSIM()
 
 def project(
     G,
