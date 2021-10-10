@@ -2,5 +2,5 @@
 	path = mdf
 	url = https://github.com/gfxdisp/mdf.git
 [submodule "pytorch-msssim"]
-	path = pytorch-msssim
-	url = https://github.com/jorge-pessoa/pytorch-msssim.git
+	path = pytorch_msssim
+	url = https://github.com/VainF/pytorch-msssim

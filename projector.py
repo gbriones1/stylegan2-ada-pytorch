@@ -24,13 +24,12 @@ import legacy
 import lpips
 
 from mdf.mdfloss import MDFLoss
-import importlib
-pytorch_msssim = importlib.import_module("pytorch-msssim.pytorch_msssim")
+from pytorch_msssim.pytorch_msssim import MS_SSIM
 
 loss_fn_alex = lpips.LPIPS(net='alex').cuda()
 loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
 loss_fn_mdf = MDFLoss("./mdf/weights/Ds_SISR.pth", cuda_available=True)
-loss_fn_msssim = pytorch_msssim.MSSSIM()
+loss_fn_msssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1, size_average=True, channel=1)
 
 def project(
     G,
@@ -124,7 +123,7 @@ def project(
         elif loss_fn == "mdf":
             dist = loss_fn_mdf(target_images, synth_images).sum()
         elif loss_fn == "msssim":
-            dist = loss_fn_msssim(target_images, synth_images).sum()
+            dist = 1 - loss_fn_msssim(target_images.float()/255.0, synth_images.float()/255.0)
         else:
             dist = (target_features - synth_features).square().sum()
 
