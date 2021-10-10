@@ -3,4 +3,4 @@
 	url = https://github.com/gfxdisp/mdf.git
 [submodule "pytorch-msssim"]
 	path = pytorch_msssim
-	url = https://github.com/VainF/pytorch-msssim
+	url = https://github.com/VainF/pytorch-msssim.git
