@@ -24,12 +24,12 @@ import legacy
 import lpips
 
 from mdf.mdfloss import MDFLoss
-from pytorch_msssim.pytorch_msssim import MS_SSIM
+from pytorch_msssim.pytorch_msssim import SSIM
 
 loss_fn_alex = lpips.LPIPS(net='alex').cuda()
 loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
 loss_fn_mdf = MDFLoss("./mdf/weights/Ds_SISR.pth", cuda_available=True)
-loss_fn_msssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1, size_average=True, channel=1)
+loss_fn_ssim = SSIM(win_size=11, win_sigma=1.5, data_range=1, size_average=True, channel=3)
 
 def project(
     G,
@@ -47,6 +47,7 @@ def project(
     train_noise                = False,
     loss_fn                    = "vgg",
     return_losses              = False,
+    resize                     = 256,
     device: torch.device
 ):
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -76,8 +77,8 @@ def project(
 
     # Features for target image.
     target_images = target.unsqueeze(0).to(device).to(torch.float32)
-    if target_images.shape[2] > 256:
-        target_images = F.interpolate(target_images, size=(256, 256), mode='area')
+    if target_images.shape[2] > resize:
+        target_images = F.interpolate(target_images, size=(resize, resize), mode='area')
     target_features = vgg16(target_images, resize_images=False, return_lpips=True)
 
     w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True) # pylint: disable=not-callable
@@ -111,19 +112,19 @@ def project(
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
         synth_images = (synth_images + 1) * (255/2)
-        if synth_images.shape[2] > 256:
-            synth_images = F.interpolate(synth_images, size=(256, 256), mode='area')
+        if synth_images.shape[2] > resize:
+            synth_images = F.interpolate(synth_images, size=(resize, resize), mode='area')
 
         # Features for synth images.
         synth_features = vgg16(synth_images, resize_images=False, return_lpips=True)
         if loss_fn == "lpips_vgg":
-            dist = loss_fn_vgg(target_images, synth_images).sum()
+            dist = loss_fn_vgg(target_images, synth_images.to(torch.float32))
         elif loss_fn == "lpips_alex":
-            dist = loss_fn_alex(target_images, synth_images).sum()
+            dist = loss_fn_alex(target_images, synth_images.to(torch.float32))
         elif loss_fn == "mdf":
-            dist = loss_fn_mdf(target_images, synth_images).sum()
-        elif loss_fn == "msssim":
-            dist = 1 - loss_fn_msssim(target_images.float()/255.0, synth_images.float()/255.0)
+            dist = loss_fn_mdf(target_images, synth_images.to(torch.float32))
+        elif loss_fn == "ssim":
+            dist = 1 - loss_fn_ssim(target_images/255.0, synth_images.to(torch.float32)/255.0)
         else:
             dist = (target_features - synth_features).square().sum()
 
