@@ -1,6 +1,6 @@
 [submodule "mdf"]
 	path = mdf
 	url = https://github.com/gfxdisp/mdf.git
-[submodule "pytorch-msssim"]
+[submodule "pytorch_msssim"]
 	path = pytorch_msssim
 	url = https://github.com/VainF/pytorch-msssim.git
